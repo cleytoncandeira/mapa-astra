@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Mapa Astra</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    html, body, #map { height: 100%; margin: 0; }
+    body { font-family: Arial, sans-serif; }
+    #status {
+      position: absolute;
+      z-index: 1000;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(255,255,255,.94);
+      padding: 8px 12px;
+      border-radius: 6px;
+      box-shadow: 0 1px 5px rgba(0,0,0,.25);
+      font-size: 13px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="status"></div>
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map', { zoomControl: true }).setView([-14.2, -51.9], 4);
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    const UF = {
+      'acre': ['12', 'AC'],
+      'alagoas': ['27', 'AL'],
+      'amapa': ['16', 'AP'],
+      'amazonas': ['13', 'AM'],
+      'bahia': ['29', 'BA'],
+      'ceara': ['23', 'CE'],
+      'distrito federal': ['53', 'DF'],
+      'espirito santo': ['32', 'ES'],
+      'goias': ['52', 'GO'],
+      'maranhao': ['21', 'MA'],
+      'mato grosso': ['51', 'MT'],
+      'mato grosso do sul': ['50', 'MS'],
+      'minas gerais': ['31', 'MG'],
+      'para': ['15', 'PA'],
+      'paraiba': ['25', 'PB'],
+      'parana': ['41', 'PR'],
+      'pernambuco': ['26', 'PE'],
+      'piaui': ['22', 'PI'],
+      'rio de janeiro': ['33', 'RJ'],
+      'rio grande do norte': ['24', 'RN'],
+      'rio grande do sul': ['43', 'RS'],
+      'rondonia': ['11', 'RO'],
+      'roraima': ['14', 'RR'],
+      'santa catarina': ['42', 'SC'],
+      'sao paulo': ['35', 'SP'],
+      'sergipe': ['28', 'SE'],
+      'tocantins': ['17', 'TO']
+    };
+
+    function normalizar(txt) {
+      return (txt || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
+    }
+
+    function obterUF(valor) {
+      const n = normalizar(valor);
+      if (UF[n]) return UF[n];
+      const sigla = (valor || '').trim().toUpperCase();
+      return Object.values(UF).find(v => v[1] === sigla) || null;
+    }
+
+    function mostrarStatus(msg) {
+      const el = document.getElementById('status');
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    const estado = params.get('estado');
+    const municipio = params.get('municipio');
+
+    if (!estado) {
+      mostrarStatus('Informe ?estado=Pará (e opcionalmente &municipio=Belém) na URL.');
+    } else {
+      const uf = obterUF(estado);
+
+      if (!uf) {
+        mostrarStatus('Estado não reconhecido: ' + estado);
+      } else {
+        const [codigoUF, siglaUF] = uf;
+        const geojsonURL = `https://raw.githubusercontent.com/tbrugz/geodata-br/master/geojson/geojs-${codigoUF}-mun.json`;
+
+        fetch(geojsonURL)
+          .then(r => {
+            if (!r.ok) throw new Error(`HTTP ${r.status}`);
+            return r.json();
+          })
+          .then(data => {
+            let features = data.features || [];
+
+            if (municipio) {
+              const alvo = normalizar(municipio);
+              features = features.filter(f => normalizar(f.properties?.name) === alvo);
+            }
+
+            if (!features.length) {
+              mostrarStatus(municipio
+                ? `Município "${municipio}" não encontrado em ${estado}.`
+                : `Nenhuma geometria encontrada para ${estado}.`);
+              return;
+            }
+
+            const filtrado = { type: 'FeatureCollection', features };
+
+            const layer = L.geoJSON(filtrado, {
+              style: {
+                color: '#2f4858',
+                weight: municipio ? 3 : 1.2,
+                fillColor: '#7aa6c2',
+                fillOpacity: 0.45
+              },
+              onEachFeature: (feature, lyr) => {
+                const nome = feature.properties?.name || 'Município';
+                const id = feature.properties?.id || '';
+                lyr.bindPopup(`<strong>${nome}</strong><br>${siglaUF}${id ? `<br>IBGE: ${id}` : ''}`);
+              }
+            }).addTo(map);
+
+            map.fitBounds(layer.getBounds(), {
+              padding: [20, 20],
+              maxZoom: municipio ? 11 : 8
+            });
+          })
+          .catch(err => {
+            console.error(err);
+            mostrarStatus('Erro ao carregar o GeoJSON.');
+          });
+      }
+    }
+  </script>
+</body>
+</html>
